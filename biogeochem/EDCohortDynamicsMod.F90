@@ -686,6 +686,8 @@ contains
     currentcohort%cambial_mort       = 0._r8
     currentCohort%c13disc_clm        = 0._r8
     currentCohort%c13disc_acc        = 0._r8
+    currentCohort%hard_level         = -2._r8
+    currentCohort%hard_level_prev    = -2._r8
 
     ! Daily nutrient fluxes are INTEGRATED over the course of the
     ! day.  This variable MUST be zerod upon creation AND
@@ -1417,6 +1419,10 @@ contains
                                    ! their initization values, which should be the same for each
 
                                    if ( .not.currentCohort%isnew) then
+                                      currentCohort%hard_level       = (currentCohort%n*currentCohort%hard_level + &
+                                           nextc%n*nextc%hard_level)/newn
+				      currentCohort%hard_level_prev  = (currentCohort%n*currentCohort%hard_level_prev + &
+                                           nextc%n*nextc%hard_level_prev)/newn 
                                       currentCohort%seed_prod      = (currentCohort%n*currentCohort%seed_prod + &
                                            nextc%n*nextc%seed_prod)/newn
                                       currentCohort%gpp_acc        = (currentCohort%n*currentCohort%gpp_acc     + &
@@ -1918,6 +1924,8 @@ contains
     n%smort = o%smort
     n%asmort = o%asmort
     n%frmort = o%frmort
+    n%hard_level = o%hard_level
+    n%hard_level_prev = o%hard_level_prev
 
     ! logging mortalities, Yi Xu
     n%lmort_direct     =o%lmort_direct
