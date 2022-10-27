@@ -19,6 +19,7 @@ module EDPhysiologyMod
   use FatesInterfaceTypesMod, only    : hlm_use_nocomp
   use FatesInterfaceTypesMod, only    : hlm_nitrogen_spec
   use FatesInterfaceTypesMod, only    : hlm_phosphorus_spec
+  use FatesInterfaceTypesMod, only    : hlm_use_planthydro,hlm_use_hydrohard
   use FatesConstantsMod, only    : r8 => fates_r8
   use FatesConstantsMod, only    : nearzero
   use EDPftvarcon      , only    : EDPftvarcon_inst
@@ -1088,6 +1089,8 @@ contains
     real(r8) :: store_c_transfer_frac  ! Fraction of storage carbon used to flush leaves
     real(r8) :: totalmemory            ! total memory of carbon [kg]
     integer  :: ipft
+    real(r8) :: max_h !marius
+    real(r8) :: hard_level2 !marius
     real(r8), parameter :: leaf_drop_fraction = 1.0_r8
     real(r8), parameter :: carbon_store_buffer = 0.10_r8
     real(r8) :: stem_drop_fraction
@@ -1117,7 +1120,15 @@ contains
           ! for leaves. Time to signal flushing
 
           if (prt_params%season_decid(ipft) == itrue)then
+            if (hlm_use_hydrohard .eq. itrue) then
+               max_h=min(max(EDPftvarcon_inst%freezetol(currentCohort%pft),max(currentSite%hardtemp,-60._r8)-10._r8),-2._r8)
+               hard_level2=currentSite%hard_level2(ipft)
+            else
+               max_h=2._r8
+               hard_level2=3._r8
+            endif
              if ( currentSite%cstatus == phen_cstat_notcold  )then                ! we have just moved to leaves being on .
+                if ( hard_level2(ipft) > max_h/2._r8)then ! we have just moved to leaves being on . marius
                 if (currentCohort%status_coh == leaves_off)then ! Are the leaves currently off?
                    currentCohort%status_coh = leaves_on         ! Leaves are on, so change status to
                    ! stop flow of carbon out of bstore.
