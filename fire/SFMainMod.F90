@@ -8,6 +8,7 @@
   use FatesConstantsMod     , only : r8 => fates_r8
   use FatesConstantsMod     , only : itrue, ifalse
   use FatesConstantsMod     , only : pi_const
+  use FatesConstantsMod     , only : nocomp_bareground
   use FatesInterfaceTypesMod     , only : hlm_masterproc ! 1= master process, 0=not master process
   use EDTypesMod            , only : numWaterMem
   use FatesGlobals          , only : fates_log
@@ -37,7 +38,6 @@
 
   use PRTGenericMod,          only : leaf_organ
   use PRTGenericMod,          only : carbon12_element
-  use PRTGenericMod,          only : all_carbon_elements
   use PRTGenericMod,          only : leaf_organ
   use PRTGenericMod,          only : fnrt_organ
   use PRTGenericMod,          only : sapw_organ
@@ -66,8 +66,8 @@
   ! The following parameter represents one of the values of hlm_spitfire_mode
   ! and more of these appear in subroutine area_burnt_intensity below
   ! NB. The same parameters are set in /src/biogeochem/CNFireFactoryMod
-  integer :: write_SF = 0     ! for debugging
-  logical :: debug = .false.  ! for debugging
+  integer :: write_SF = ifalse   ! for debugging
+  logical :: debug = .false.     ! for debugging
 
   ! ============================================================================
   ! ============================================================================
@@ -95,7 +95,7 @@ contains
        currentPatch => currentPatch%older
     enddo
 
-    if(write_SF==1)then
+    if(write_SF==itrue)then
        write(fates_log(),*) 'spitfire_mode', hlm_spitfire_mode
     endif
 
@@ -127,6 +127,8 @@ contains
     type(ed_site_type)     , intent(inout), target :: currentSite
     type(bc_in_type)       , intent(in)            :: bc_in
 
+    type(ed_patch_type),  pointer :: currentPatch
+
     real(r8) :: temp_in_C  ! daily averaged temperature in celcius
     real(r8) :: rainfall   ! daily precip in mm/day
     real(r8) :: rh         ! daily rh 
@@ -141,9 +143,17 @@ contains
     ! is simply using the values associated with the first patch.
     ! which probably won't have much inpact, unless we decide to ever calculated the NI for each patch.  
     
-    iofp = currentSite%oldest_patch%patchno
+    currentPatch => currentSite%oldest_patch
+
+    ! If the oldest patch is a bareground patch (i.e. nocomp mode is on) use the first vegetated patch
+    ! for the iofp index (i.e. the next younger patch)
+    if(currentPatch%nocomp_pft_label .eq. nocomp_bareground)then
+      currentPatch => currentPatch%younger
+    endif
+
+    iofp = currentPatch%patchno
     
-    temp_in_C  = currentSite%oldest_patch%tveg24%GetMean() - tfrz
+    temp_in_C  = currentPatch%tveg24%GetMean() - tfrz
     rainfall   = bc_in%precip24_pa(iofp)*sec_per_day
     rh         = bc_in%relhumid24_pa(iofp)
     
@@ -181,10 +191,10 @@ contains
 
     fuel_moisture(:) = 0.0_r8
     
-    
-
     currentPatch => currentSite%oldest_patch; 
     do while(associated(currentPatch))  
+
+       if(currentPatch%nocomp_pft_label .ne. nocomp_bareground)then
 
        litt_c => currentPatch%litter(element_pos(carbon12_element))
        
@@ -192,10 +202,13 @@ contains
        currentPatch%livegrass = 0.0_r8 
        currentCohort => currentPatch%tallest
        do while(associated(currentCohort))
-          if( int(prt_params%woody(currentCohort%pft)) == ifalse)then 
+           ! for grasses sum all aboveground tissues
+           if( prt_params%woody(currentCohort%pft) == ifalse)then 
              
              currentPatch%livegrass = currentPatch%livegrass + &
-                  currentCohort%prt%GetState(leaf_organ, all_carbon_elements) * &
+                  ( currentCohort%prt%GetState(leaf_organ, carbon12_element) + &
+                  currentCohort%prt%GetState(sapw_organ, carbon12_element) + &
+                  currentCohort%prt%GetState(struct_organ, carbon12_element) ) * &
                   currentCohort%n/currentPatch%area
 
           endif
@@ -304,8 +317,10 @@ contains
           endif
           currentPatch%fuel_sav = sum(SF_val_SAV(1:nfsc))/(nfsc) ! make average sav to avoid crashing code. 
 
-          if ( hlm_masterproc == itrue ) write(fates_log(),*) 'problem with spitfire fuel averaging'
-
+          if ( hlm_masterproc == itrue .and. write_SF == itrue)then
+             write(fates_log(),*) 'problem with spitfire fuel averaging'
+          end if
+          
           ! FIX(SPM,032414) refactor...should not have 0 fuel unless everything is burnt
           ! off.
           currentPatch%fuel_eff_moist = 0.0000000001_r8 
@@ -321,7 +336,7 @@ contains
             0.0_r8.or.currentPatch%fuel_mef <= 0.0_r8.or.currentPatch%fuel_eff_moist <= 0.0_r8)then
             if ( hlm_masterproc == itrue ) write(fates_log(),*) 'problem with spitfire fuel averaging'
        endif 
-       
+       endif !nocomp_pft_label check
        currentPatch => currentPatch%younger
 
     enddo !end patch loop
@@ -352,10 +367,17 @@ contains
     integer  :: iofp                 ! index of oldest fates patch
 
 
+    currentPatch => currentSite%oldest_patch
+
+    ! If the oldest patch is a bareground patch (i.e. nocomp mode is on) use the first vegetated patch
+    ! for the iofp index (i.e. the next younger patch)
+    if(currentPatch%nocomp_pft_label .eq. nocomp_bareground)then
+      currentPatch => currentPatch%younger
+    endif
+
     ! note - this is a patch level temperature, which probably won't have much inpact, 
     ! unless we decide to ever calculated the NI for each patch.  
-
-    iofp = currentSite%oldest_patch%patchno
+    iofp = currentPatch%patchno
     currentSite%wind = bc_in%wind24_pa(iofp) * sec_per_min !Convert to m/min for SPITFIRE
 
     if(write_SF == itrue)then
@@ -368,13 +390,16 @@ contains
     grass_fraction = 0.0_r8
     currentPatch=>currentSite%oldest_patch;  
     do while(associated(currentPatch))
+
+       if(currentPatch%nocomp_pft_label .ne. nocomp_bareground)then
+       
        currentPatch%total_tree_area = 0.0_r8
        total_grass_area = 0.0_r8
        currentCohort => currentPatch%tallest
  
        do while(associated(currentCohort))
           if (debug) write(fates_log(),*) 'SF currentCohort%c_area ',currentCohort%c_area
-          if( int(prt_params%woody(currentCohort%pft)) == itrue)then
+          if( prt_params%woody(currentCohort%pft) == itrue)then
              currentPatch%total_tree_area = currentPatch%total_tree_area + currentCohort%c_area
           else
              total_grass_area = total_grass_area + currentCohort%c_area
@@ -390,6 +415,8 @@ contains
          write(fates_log(),*) 'SF  total_grass_area ',tree_fraction,grass_fraction
          write(fates_log(),*) 'SF  AREA ',AREA
        endif
+
+       endif !nocomp_pft_label check
        
        currentPatch => currentPatch%younger
     enddo !currentPatch loop
@@ -405,9 +432,13 @@ contains
     currentPatch=>currentSite%oldest_patch;
 
     do while(associated(currentPatch))       
+       if(currentPatch%nocomp_pft_label .ne. nocomp_bareground)then
+
        currentPatch%total_tree_area = min(currentPatch%total_tree_area,currentPatch%area)
        ! effect_wspeed in units m/min      
        currentPatch%effect_wspeed = currentSite%wind * (tree_fraction*0.4_r8+(grass_fraction+bare_fraction)*0.6_r8)
+
+       endif ! nocomp_pft_label check
       
        currentPatch => currentPatch%younger
     enddo !end patch loop
@@ -425,8 +456,6 @@ contains
                              SF_val_miner_damp,  &
                              SF_val_fuel_energy
     
-    use FatesInterfaceTypesMod, only : hlm_current_day, hlm_current_month
-
     type(ed_site_type), intent(in), target :: currentSite
 
     type(ed_patch_type), pointer :: currentPatch
@@ -448,6 +477,8 @@ contains
     currentPatch=>currentSite%oldest_patch;  
 
     do while(associated(currentPatch))
+
+       if(currentPatch%nocomp_pft_label .ne. nocomp_bareground)then
               
        ! remove mineral content from net fuel load per Thonicke 2010 for ir calculation
        currentPatch%sum_fuel  = currentPatch%sum_fuel * (1.0_r8 - SF_val_miner_total) !net of minerals
@@ -553,6 +584,7 @@ contains
        ! backward ROS wind not changed by vegetation 
        currentPatch%ROS_back = currentPatch%ROS_front*exp(-0.012_r8*currentSite%wind) 
 
+       end if ! nocomp_pft_label check
        currentPatch => currentPatch%younger
 
     enddo !end patch loop
@@ -581,6 +613,9 @@ contains
     currentPatch => currentSite%oldest_patch;  
 
     do while(associated(currentPatch))
+
+       if(currentPatch%nocomp_pft_label .ne. nocomp_bareground)then
+
        currentPatch%burnt_frac_litter(:) = 1.0_r8       
        ! Calculate fraction of litter is burnt for all classes. 
        ! Equation B1 in Thonicke et al. 2010---
@@ -639,6 +674,8 @@ contains
        !---calculate overall fuel consumed by spreading fire --- 
        ! ignore 1000hr fuels. Just interested in fuels affecting ROS   
        currentPatch%TFC_ROS = sum(FC_ground)-FC_ground(tr_sf)  
+
+       end if ! nocomp_pft_label check
 
        currentPatch=>currentPatch%younger;
     enddo !end patch loop
@@ -700,8 +737,16 @@ contains
        cloud_to_ground_strikes = cg_strikes
     end if
     
+    currentPatch => currentSite%oldest_patch
+
+    ! If the oldest patch is a bareground patch (i.e. nocomp mode is on) use the first vegetated patch
+    ! for the iofp index (i.e. the next younger patch)
+    if(currentPatch%nocomp_pft_label .eq. nocomp_bareground)then
+      currentPatch => currentPatch%younger
+    endif
+    
     !NF = number of lighting strikes per day per km2 scaled by cloud to ground strikes
-    iofp = currentSite%oldest_patch%patchno
+    iofp = currentPatch%patchno
     if (hlm_spitfire_mode == hlm_sf_scalar_lightning_def ) then
        currentSite%NF = ED_val_nignitions * years_per_day * cloud_to_ground_strikes
     else    ! use external daily lightning ignition data
@@ -724,6 +769,9 @@ contains
 
     currentPatch => currentSite%oldest_patch;  
     do while(associated(currentPatch))
+
+       if(currentPatch%nocomp_pft_label .ne. nocomp_bareground)then
+
        !  ---initialize patch parameters to zero---
        currentPatch%FI         = 0._r8
        currentPatch%fire       = 0
@@ -760,7 +808,7 @@ contains
                  lb = (1.0_r8 + (8.729_r8 * &
                       ((1.0_r8 -(exp(-0.03_r8 * m_per_min__to__km_per_hour * currentPatch%effect_wspeed)))**2.155_r8)))
              else ! EQ 80 grass fuels (CFFBPS Ont.Inf.Rep. ST-X-3, 1992, but with a correction from an errata published within 
-                  ! Information Report GLC-X-10 by Bottom et al., 2009 because there is a typo in CFFBPS Ont.Inf.Rep. ST-X-3, 1992)
+                  ! Information Report GLC-X-10 by Wotton et al., 2009 for a typo in CFFBPS Ont.Inf.Rep. ST-X-3, 1992)
                  lb = (1.1_r8*((m_per_min__to__km_per_hour * currentPatch%effect_wspeed)**0.464_r8))
              endif
           endif
@@ -827,7 +875,8 @@ contains
             currentPatch%frac_burnt = 0.0_r8
          endif         
           
-       endif! NF ignitions check
+       endif ! NF ignitions check
+       endif ! nocomp_pft_label check
        
        currentPatch => currentPatch%younger
 
@@ -859,16 +908,18 @@ contains
 
     currentPatch => currentSite%oldest_patch;  
     do while(associated(currentPatch)) 
+
+       if(currentPatch%nocomp_pft_label .ne. nocomp_bareground)then
        
        tree_ag_biomass = 0.0_r8
        if (currentPatch%fire == 1) then
           currentCohort => currentPatch%tallest;
           do while(associated(currentCohort))  
-             if ( int(prt_params%woody(currentCohort%pft)) == itrue) then !trees only
+             if ( prt_params%woody(currentCohort%pft) == itrue) then !trees only
 
-                leaf_c = currentCohort%prt%GetState(leaf_organ, all_carbon_elements)
-                sapw_c = currentCohort%prt%GetState(sapw_organ, all_carbon_elements)
-                struct_c = currentCohort%prt%GetState(struct_organ, all_carbon_elements)
+                leaf_c = currentCohort%prt%GetState(leaf_organ, carbon12_element)
+                sapw_c = currentCohort%prt%GetState(sapw_organ, carbon12_element)
+                struct_c = currentCohort%prt%GetState(struct_organ, carbon12_element)
                 
                 tree_ag_biomass = tree_ag_biomass + &
                       currentCohort%n * (leaf_c + & 
@@ -878,7 +929,7 @@ contains
           enddo !end cohort loop
 
           do i_pft=1,numpft
-             if (tree_ag_biomass > 0.0_r8  .and. int(prt_params%woody(i_pft)) == itrue) then 
+             if (tree_ag_biomass > 0.0_r8  .and. prt_params%woody(i_pft) == itrue) then 
                 
                 !Equation 16 in Thonicke et al. 2010 !Van Wagner 1973 EQ8 !2/3 Byram (1959)
                 currentPatch%Scorch_ht(i_pft) = EDPftvarcon_inst%fire_alpha_SH(i_pft) * (currentPatch%FI**0.667_r8)
@@ -892,6 +943,7 @@ contains
           end do
 
        endif !fire
+       endif !nocomp_pft_label
 
        currentPatch => currentPatch%younger;  
     enddo !end patch loop
@@ -914,13 +966,15 @@ contains
     currentPatch => currentSite%oldest_patch
 
     do while(associated(currentPatch)) 
+
+       if(currentPatch%nocomp_pft_label .ne. nocomp_bareground)then
        if (currentPatch%fire == 1) then
 
           currentCohort=>currentPatch%tallest
 
           do while(associated(currentCohort))  
              currentCohort%fraction_crown_burned = 0.0_r8
-             if ( int(prt_params%woody(currentCohort%pft)) == itrue) then !trees only
+             if ( prt_params%woody(currentCohort%pft) == itrue) then !trees only
                 ! Flames lower than bottom of canopy. 
                 ! c%hite is height of cohort
 
@@ -955,6 +1009,7 @@ contains
 
           enddo !end cohort loop
        endif !fire?
+       endif !nocomp_pft_label check
 
        currentPatch => currentPatch%younger;
 
@@ -981,10 +1036,12 @@ contains
 
     do while(associated(currentPatch)) 
 
+       if(currentPatch%nocomp_pft_label .ne. nocomp_bareground)then
+
        if (currentPatch%fire == 1) then
           currentCohort => currentPatch%tallest;
           do while(associated(currentCohort))  
-             if ( int(prt_params%woody(currentCohort%pft)) == itrue) then !trees only
+             if ( prt_params%woody(currentCohort%pft) == itrue) then !trees only
                 ! Equation 21 in Thonicke et al 2010
                 bt = EDPftvarcon_inst%bark_scaler(currentCohort%pft)*currentCohort%dbh ! bark thickness. 
                 ! Equation 20 in Thonicke et al. 2010. 
@@ -1005,6 +1062,7 @@ contains
 
           enddo !end cohort loop
        endif !fire?
+       endif !nocomp_pft_label check
 
        currentPatch=>currentPatch%younger;
 
@@ -1031,12 +1089,14 @@ contains
 
     do while(associated(currentPatch)) 
 
+       if(currentPatch%nocomp_pft_label .ne. nocomp_bareground)then
+
        if (currentPatch%fire == 1) then 
           currentCohort => currentPatch%tallest
           do while(associated(currentCohort))  
              currentCohort%fire_mort = 0.0_r8
              currentCohort%crownfire_mort = 0.0_r8
-             if ( int(prt_params%woody(currentCohort%pft)) == itrue) then
+             if ( prt_params%woody(currentCohort%pft) == itrue) then
                 ! Equation 22 in Thonicke et al. 2010. 
                 currentCohort%crownfire_mort = EDPftvarcon_inst%crown_kill(currentCohort%pft)*currentCohort%fraction_crown_burned**3.0_r8
                 ! Equation 18 in Thonicke et al. 2010. 
@@ -1050,6 +1110,7 @@ contains
 
           enddo !end cohort loop
        endif !fire?
+       endif !nocomp_pft_label check
 
        currentPatch => currentPatch%younger
 
