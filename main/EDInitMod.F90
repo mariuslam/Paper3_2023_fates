@@ -317,11 +317,11 @@ contains
                                             ! immediately, so yes this
                                             ! is memory-less, but needed
                                             ! for first value in history file
-          sites(s)%phen_model_date = 0
-          sites(s)%cleafondate     = cleafon  - hlm_day_of_year
-          sites(s)%cleafoffdate    = cleafoff - hlm_day_of_year
-          sites(s)%dleafoffdate    = dleafoff - hlm_day_of_year
-          sites(s)%dleafondate     = dleafon  - hlm_day_of_year
+
+          sites(s)%cleafondate     = cleafon
+          sites(s)%cleafoffdate    = cleafoff
+          sites(s)%dleafoffdate    = dleafoff
+          sites(s)%dleafondate     = dleafon
           sites(s)%grow_deg_days   = GDD
           sites(s)%hardtemp        = -2._r8
           sites(s)%hard_level2(1:numpft) = -2._r8

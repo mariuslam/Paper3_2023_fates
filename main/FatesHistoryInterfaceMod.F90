@@ -1699,7 +1699,7 @@ end subroutine flush_hvars
     use EDtypesMod          , only : nfsc
     use FatesLitterMod      , only : ncwd
     use EDtypesMod          , only : ican_upper
-    use EDtypesMod          , only : ican_ustory
+    use EDtypesMod          , only : ican_ustory,maxpft
     use FatesSizeAgeTypeIndicesMod, only : get_sizeage_class_index
     use FatesSizeAgeTypeIndicesMod, only : get_sizeagepft_class_index
     use FatesSizeAgeTypeIndicesMod, only : get_agepft_class_index
@@ -1747,7 +1747,8 @@ end subroutine flush_hvars
     integer  :: model_day_int ! integer model day from reference
     integer  :: ageclass_since_anthrodist  ! what is the equivalent age class for
                                            ! time-since-anthropogenic-disturbance of secondary forest
-
+    real(r8) :: number_fraction_pft
+    real(r8) :: ncohort_pft(maxpft)
     real(r8) :: store_max   ! The target nutrient mass for storage element of interest [kg]
     real(r8) :: n_perm2     ! individuals per m2 for the whole column
     real(r8) :: dbh         ! diameter ("at breast height")

@@ -1090,7 +1090,7 @@ contains
     real(r8) :: totalmemory            ! total memory of carbon [kg]
     integer  :: ipft
     real(r8) :: max_h !marius
-    real(r8) :: hard_level2 !marius
+    real(r8) :: hard_level2(maxpft) !marius
     real(r8), parameter :: leaf_drop_fraction = 1.0_r8
     real(r8), parameter :: carbon_store_buffer = 0.10_r8
     real(r8) :: stem_drop_fraction
@@ -1184,6 +1184,7 @@ contains
 
                    endif
                 endif !pft phenology
+                endif
              endif ! growing season
 
              !COLD LEAF OFF
